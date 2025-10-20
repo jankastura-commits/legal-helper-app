@@ -2,86 +2,80 @@ const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
 const nodemailer = require("nodemailer");
-const axios = require("axios");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-
 app.use(cors());
 app.use(bodyParser.json());
 
-// ✅ Hlavní endpoint
-app.post("/process", async (req, res) => {
-  try {
-    const { text, email } = req.body;
+app.post("/api/generate", async (req, res) => {
+  const {
+    party1_type,
+    party1_name,
+    party1_address,
+    party1_ico,
+    party1_representative,
+    party1_role,
+    party2_type,
+    party2_name,
+    party2_address,
+    party2_ico,
+    party2_representative,
+    party2_role,
+    situation,
+    email,
+  } = req.body;
 
-    if (!text || !email) {
-      return res.status(400).json({ message: "Chybí text nebo e-mail." });
-    }
+  // ✅ Validace základních polí
+  if (!party1_name || !party1_address || !party2_name || !party2_address || !situation || !email) {
+    return res.status(400).json({ error: "Chybí povinné údaje ve formuláři." });
+  }
 
-    // ✅ Vyhledání IČO v textu
-    const icoMatch = text.match(/\b\d{8}\b/);
-    let ico = icoMatch ? icoMatch[0] : null;
-    let companyInfo = "";
+  // ✅ Fallback: pokud není IČO, vytvoří se obecná identifikace
+  const party1_id = party1_ico ? `IČO: ${party1_ico}` : `(bez IČO)`;
+  const party2_id = party2_ico ? `IČO: ${party2_ico}` : `(bez IČO)`;
 
-    if (ico) {
-      try {
-        const icoData = await axios.get(`https://aresapi.com/api/ico/${ico}`);
-        companyInfo = `Název firmy: ${icoData.data.name}\nIČO: ${ico}`;
-      } catch (e) {
-        console.warn(`⚠️ Nepodařilo se získat data pro IČO ${ico}:`, e.message);
-        companyInfo = `IČO: ${ico} (detail se nepodařilo získat)`;
-      }
-    } else {
-      companyInfo = "IČO nebylo zadáno. Smlouva bude vytvořena bez konkrétní firmy.";
-    }
+  // ✅ Pokud je společnost zastoupena osobou
+  const party1_rep = party1_representative
+    ? `, zastoupená ${party1_representative}${party1_role ? ` (${party1_role})` : ""}`
+    : "";
+  const party2_rep = party2_representative
+    ? `, zastoupená ${party2_representative}${party2_role ? ` (${party2_role})` : ""}`
+    : "";
 
-    // ✅ Generování textu smlouvy (zatím staticky, můžeš nahradit GPT)
-    const smlouva = `
-📄 Návrh kupní smlouvy
+  // 🧾 Text smlouvy
+  const contract = `
+SMLUVNÍ STRANY:
 
-${companyInfo}
+1️⃣ ${party1_name}, ${party1_address}, ${party1_id}${party1_rep}
+2️⃣ ${party2_name}, ${party2_address}, ${party2_id}${party2_rep}
 
-Zadání: ${text}
+PŘEDMĚT SMLOUVY:
+${situation}
 
-Tento návrh je vytvořen automaticky a měl by být zkontrolován právníkem.
+Tato smlouva byla automaticky vygenerována nástrojem Legal Helper.
 `;
 
-    // ✅ Odeslání e-mailu
-    try {
-      const transporter = nodemailer.createTransport({
-        service: "gmail",
-        auth: {
-          user: process.env.MAIL_USER,
-          pass: process.env.MAIL_PASS,
-        },
-      });
+  // ✅ Odeslání e-mailu se smlouvou
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      user: process.env.MAIL_USER,
+      pass: process.env.MAIL_PASS,
+    },
+  });
 
-      await transporter.sendMail({
-        from: process.env.MAIL_USER,
-        to: email,
-        subject: "Návrh kupní smlouvy",
-        text: smlouva,
-      });
-
-      console.log(`📨 E-mail odeslán na ${email}`);
-    } catch (mailError) {
-      console.error("❌ Chyba při odesílání e-mailu:", mailError);
-      return res
-        .status(500)
-        .json({ message: "Smlouva byla vytvořena, ale e-mail se nepodařilo odeslat." });
-    }
-
-    // ✅ Úspěšná odpověď
-    res.json({
-      message: ico
-        ? "Smlouva byla vytvořena a odeslána."
-        : "Smlouva byla vytvořena bez IČO a odeslána.",
-      status: "ok",
+  try {
+    await transporter.sendMail({
+      from: process.env.MAIL_USER,
+      to: email,
+      subject: "Návrh smlouvy – Legal Helper",
+      text: contract,
     });
-  } catch (err) {
-    console.error("❌ Chyba při zpracování požadavku:", err);
-    res.status(500).json({ message: "Došlo k chybě při zpracování požadavku." });
+
+    res.json({ message: "Smlouva byla úspěšně vytvořena a odeslána e-mailem." });
+  } catch (error) {
+    console.error("❌ Chyba při odesílání e-mailu:", error);
+    res.status(500).json({ error: "Nepodařilo se odeslat e-mail." });
   }
 });
 
@@ -91,6 +85,7 @@ app.get("/", (req, res) => {
 });
 
 // ✅ Spuštění serveru
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Server běží na portu ${PORT}`);
 });
