@@ -56,36 +56,24 @@
     }
   </style>
   <script>
-    const orToken = "f3e38dad06f6411e8ef0b351205af317";
-
-    async function fetchCompanyInfo(ico, elementId, repNameId, repRoleId) {
+    async function fetchCompanyInfo(ico, elementId) {
       const infoBox = document.getElementById(elementId);
       if (!ico) {
         infoBox.innerText = "";
         return;
       }
-
       infoBox.innerText = "⏳ Načítám údaje...";
       try {
-        const res = await fetch(`https://api.opencorporates.cz/v1/ico/${ico}`, {
-          headers: { Authorization: `Bearer ${orToken}` }
-        });
+        const res = await fetch(`/api/ares?ico=${ico}`);
         const data = await res.json();
 
-        if (!res.ok || !data || !data.data) {
-          throw new Error("Chyba při načítání dat");
-        }
-
-        const { obchodniJmeno, sidlo, pravniForma, statutari } = data.data;
-        infoBox.innerText = `✅ Název: ${obchodniJmeno}\nAdresa: ${sidlo?.text || 'neuvedeno'}\nForma: ${pravniForma || 'neuvedeno'}`;
-
-        const statutar = Array.isArray(statutari) ? statutari[0] : statutari;
-        if (statutar) {
-          document.getElementById(repNameId).value = statutar.jmeno || '';
-          document.getElementById(repRoleId).value = statutar.funkce || '';
+        if (res.ok && data && data.name) {
+          infoBox.innerText = `✅ Název: ${data.name}\nAdresa: ${data.address || 'neuvedeno'}\nZastoupená: ${data.representedBy || 'neuvedeno'} (${data.role || 'neuvedeno'})`;
+        } else {
+          infoBox.innerText = "❌ Firma s tímto IČO nebyla nalezena.";
         }
       } catch (e) {
-        infoBox.innerText = "❌ Firma s tímto IČO nebyla nalezena.";
+        infoBox.innerText = "❌ Nepodařilo se načíst údaje o firmě.";
       }
     }
 
@@ -103,22 +91,10 @@
     }
 
     window.addEventListener("DOMContentLoaded", () => {
-      document.getElementById("party1_ico").addEventListener("blur", () => {
-        const ico = document.getElementById("party1_ico").value;
-        fetchCompanyInfo(ico, "companyInfo1", "party1_representative", "party1_role");
-      });
-
-      document.getElementById("party2_ico").addEventListener("blur", () => {
-        const ico = document.getElementById("party2_ico").value;
-        fetchCompanyInfo(ico, "companyInfo2", "party2_representative", "party2_role");
-      });
-
-      document.getElementById("party1_type").addEventListener("change", () =>
-        handleICOValidation("party1_type", "party1_ico", "party1_rep")
-      );
-      document.getElementById("party2_type").addEventListener("change", () =>
-        handleICOValidation("party2_type", "party2_ico", "party2_rep")
-      );
+      document.getElementById("party1_type").addEventListener("change", () => handleICOValidation("party1_type", "party1_ico", "party1_rep"));
+      document.getElementById("party2_type").addEventListener("change", () => handleICOValidation("party2_type", "party2_ico", "party2_rep"));
+      document.getElementById("party1_ico").addEventListener("blur", () => fetchCompanyInfo(document.getElementById("party1_ico").value, "companyInfo1"));
+      document.getElementById("party2_ico").addEventListener("blur", () => fetchCompanyInfo(document.getElementById("party2_ico").value, "companyInfo2"));
     });
   </script>
 </head>
