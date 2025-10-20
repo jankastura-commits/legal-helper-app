@@ -54,100 +54,71 @@
       color: gray;
       font-style: italic;
     }
-    #status {
-      margin-top: 1rem;
-      font-weight: bold;
-    }
   </style>
   <script>
-    const HLIDAC_TOKEN = "f3e38dad06f6411e8ef0b351205af317";
+    const orToken = "f3e38dad06f6411e8ef0b351205af317";
 
-    async function fetchCompanyInfo(ico, infoBoxId, repFieldId, roleFieldId) {
-      const infoBox = document.getElementById(infoBoxId);
-      const repField = document.getElementById(repFieldId);
-      const roleField = document.getElementById(roleFieldId);
-
+    async function fetchCompanyInfo(ico, elementId, repNameId, repRoleId) {
+      const infoBox = document.getElementById(elementId);
       if (!ico) {
         infoBox.innerText = "";
         return;
       }
 
       infoBox.innerText = "⏳ Načítám údaje...";
-
       try {
-        const res = await fetch(`https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty/${ico}`);
-        const data = await res.json();
-
-        if (data && data.obchodniJmeno) {
-          infoBox.innerText = `✅ Název: ${data.obchodniJmeno}\nAdresa: ${data.sidlo?.textovaAdresa || 'neuvedeno'}`;
-        } else {
-          infoBox.innerText = "❌ Firma s tímto IČO nebyla nalezena.";
-        }
-      } catch {
-        infoBox.innerText = "❌ Nepodařilo se načíst údaje z ARES.";
-      }
-
-      // Načti zástupce z Hlídače státu
-      try {
-        const res = await fetch(`https://api.hlidacstatu.cz/api/v2/ObchodniRejstrik?ico=${ico}`, {
-          headers: { "Authorization": `Bearer ${HLIDAC_TOKEN}` }
+        const res = await fetch(`https://api.opencorporates.cz/v1/ico/${ico}`, {
+          headers: { Authorization: `Bearer ${orToken}` }
         });
         const data = await res.json();
-        if (data?.StatutarniOrgan?.length > 0) {
-          repField.value = data.StatutarniOrgan[0].Jmeno || "";
-          roleField.value = data.StatutarniOrgan[0].Funkce || "";
+
+        if (!res.ok || !data || !data.data) {
+          throw new Error("Chyba při načítání dat");
         }
-      } catch {
-        // nech prázdné
+
+        const { obchodniJmeno, sidlo, pravniForma, statutari } = data.data;
+        infoBox.innerText = `✅ Název: ${obchodniJmeno}\nAdresa: ${sidlo?.text || 'neuvedeno'}\nForma: ${pravniForma || 'neuvedeno'}`;
+
+        const statutar = Array.isArray(statutari) ? statutari[0] : statutari;
+        if (statutar) {
+          document.getElementById(repNameId).value = statutar.jmeno || '';
+          document.getElementById(repRoleId).value = statutar.funkce || '';
+        }
+      } catch (e) {
+        infoBox.innerText = "❌ Firma s tímto IČO nebyla nalezena.";
       }
     }
 
-    async function handleSubmit() {
-      const status = document.getElementById("status");
-      status.innerText = "⏳ Zpracovávám...";
-
-      const body = {
-        party1: {
-          type: document.getElementById("party1_type").value,
-          name: document.getElementById("party1_name").value,
-          address: document.getElementById("party1_address").value,
-          ico: document.getElementById("party1_ico").value,
-          representative: document.getElementById("party1_representative").value,
-          role: document.getElementById("party1_role").value
-        },
-        party2: {
-          type: document.getElementById("party2_type").value,
-          name: document.getElementById("party2_name").value,
-          address: document.getElementById("party2_address").value,
-          ico: document.getElementById("party2_ico").value,
-          representative: document.getElementById("party2_representative").value,
-          role: document.getElementById("party2_role").value
-        },
-        situation: document.getElementById("situation").value,
-        email: document.getElementById("email").value
-      };
-
-      try {
-        const res = await fetch("/api/generate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body)
-        });
-
-        if (res.ok) {
-          status.innerText = "✅ Smlouva byla vygenerována a odeslána na e-mail.";
-        } else {
-          status.innerText = "❌ Chyba při odesílání. Zkontrolujte formulář nebo zkuste znovu.";
-        }
-      } catch {
-        status.innerText = "❌ Server je nedostupný.";
+    function handleICOValidation(selectId, icoInputId, fieldsGroupId) {
+      const type = document.getElementById(selectId).value;
+      const icoField = document.getElementById(icoInputId);
+      const repFields = document.getElementById(fieldsGroupId);
+      if (type === "firma") {
+        icoField.setAttribute("required", "required");
+        repFields.style.display = 'block';
+      } else {
+        icoField.removeAttribute("required");
+        repFields.style.display = 'none';
       }
     }
 
     window.addEventListener("DOMContentLoaded", () => {
-      document.getElementById("party1_ico").addEventListener("blur", () => fetchCompanyInfo("party1_ico", "companyInfo1", "party1_representative", "party1_role"));
-      document.getElementById("party2_ico").addEventListener("blur", () => fetchCompanyInfo("party2_ico", "companyInfo2", "party2_representative", "party2_role"));
-      document.getElementById("submitBtn").addEventListener("click", handleSubmit);
+      document.getElementById("party1_ico").addEventListener("blur", () => {
+        const ico = document.getElementById("party1_ico").value;
+        fetchCompanyInfo(ico, "companyInfo1", "party1_representative", "party1_role");
+      });
+
+      document.getElementById("party2_ico").addEventListener("blur", () => {
+        const ico = document.getElementById("party2_ico").value;
+        fetchCompanyInfo(ico, "companyInfo2", "party2_representative", "party2_role");
+      });
+
+      document.getElementById("party1_type").addEventListener("change", () =>
+        handleICOValidation("party1_type", "party1_ico", "party1_rep")
+      );
+      document.getElementById("party2_type").addEventListener("change", () =>
+        handleICOValidation("party2_type", "party2_ico", "party2_rep")
+      );
     });
   </script>
 </head>
@@ -161,17 +132,23 @@
       <option value="fyzicka">Fyzická osoba</option>
       <option value="firma">Firma</option>
     </select>
+
     <label for="party1_name" class="required">Jméno / Název:</label>
     <input id="party1_name" required />
+
     <label for="party1_address" class="required">Adresa / Sídlo:</label>
     <input id="party1_address" required />
+
     <label for="party1_ico">IČO:</label>
     <input id="party1_ico" />
     <div id="companyInfo1"></div>
-    <label for="party1_representative">Zastoupena:</label>
-    <input id="party1_representative" />
-    <label for="party1_role">Funkce zástupce:</label>
-    <input id="party1_role" />
+
+    <div id="party1_rep" style="display:none">
+      <label for="party1_representative">Zastoupena:</label>
+      <input id="party1_representative" placeholder="Např. Jan Novák" />
+      <label for="party1_role">Funkce zástupce:</label>
+      <input id="party1_role" placeholder="Např. jednatel, CEO" />
+    </div>
 
     <h2>Druhá smluvní strana</h2>
     <label for="party2_type" class="required">Typ subjektu:</label>
@@ -179,17 +156,23 @@
       <option value="fyzicka">Fyzická osoba</option>
       <option value="firma">Firma</option>
     </select>
+
     <label for="party2_name" class="required">Jméno / Název:</label>
     <input id="party2_name" required />
+
     <label for="party2_address" class="required">Adresa / Sídlo:</label>
     <input id="party2_address" required />
+
     <label for="party2_ico">IČO:</label>
     <input id="party2_ico" />
     <div id="companyInfo2"></div>
-    <label for="party2_representative">Zastoupena:</label>
-    <input id="party2_representative" />
-    <label for="party2_role">Funkce zástupce:</label>
-    <input id="party2_role" />
+
+    <div id="party2_rep" style="display:none">
+      <label for="party2_representative">Zastoupena:</label>
+      <input id="party2_representative" placeholder="Např. Petr Dvořák" />
+      <label for="party2_role">Funkce zástupce:</label>
+      <input id="party2_role" placeholder="Např. jednatel, CEO" />
+    </div>
 
     <label for="situation" class="required">Popis situace / účel smlouvy:</label>
     <textarea id="situation" rows="4" required></textarea>
@@ -198,7 +181,7 @@
     <input id="email" type="email" required />
 
     <button id="submitBtn">Zpracovat</button>
-    <div id="status"></div>
+    <div id="status" style="margin-top: 1rem; font-weight: bold;"></div>
   </div>
 </body>
 </html>
