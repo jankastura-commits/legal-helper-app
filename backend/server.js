@@ -1,49 +1,76 @@
 const express = require('express');
-const bodyParser = require('body-parser');
 const cors = require('cors');
-const { getFirmData } = require('./ares');
-const { generateDoc } = require('./doc-generator');
-const { sendEmail } = require('./emailer');
+const bodyParser = require('body-parser');
+const axios = require('axios');
+const nodemailer = require('nodemailer');
 
 const app = express();
-
-// ✅ CORS konfigurace pro Netlify frontend
-app.use(cors({
-  origin: 'https://legal-helper-app.netlify.app', // změň pokud máš jinou doménu
-  methods: ['POST'],
-}));
-
+app.use(cors());
 app.use(bodyParser.json());
 
 app.post('/process', async (req, res) => {
   try {
     const { text, email } = req.body;
 
-    // ✅ Vytažení IČO ze zadaného textu
-    const ic = text.match(/IČO\s?(\d{8})/);
-    if (!ic) {
-      return res.status(400).json({ message: "IČO nebylo nalezeno v textu." });
+    if (!text || !email) {
+      return res.status(400).json({ message: 'Chybí text nebo e-mail.' });
     }
 
-    const ico = ic[1];
+    const icoMatch = text.match(/\b\d{8}\b/);
+    let ico = icoMatch ? icoMatch[0] : null;
 
-    // ✅ Načtení dat z ARES
-    const firmData = await getFirmData(ico);
+    let companyInfo = '';
+    if (ico) {
+      // pokusíme se stáhnout info o firmě
+      try {
+        const icoData = await axios.get(`https://aresapi.com/api/ico/${ico}`);
+        companyInfo = `Název firmy: ${icoData.data.name}\nIČO: ${ico}`;
+      } catch (e) {
+        console.warn(`Nepodařilo se získat data pro IČO ${ico}:`, e.message);
+        companyInfo = `IČO: ${ico} (detail se nepodařilo získat)`;
+      }
+    } else {
+      companyInfo = 'IČO nebylo zadáno. Smlouva bude vytvořena bez konkrétní firmy.';
+    }
 
-    // ✅ Vygenerování dokumentu
-    const docPath = await generateDoc(text, firmData);
+    // vytvoření textu smlouvy
+    const smlouva = `
+Návrh kupní smlouvy
 
-    // ✅ Odeslání e-mailem
-    await sendEmail(email, docPath);
+${companyInfo}
 
-    res.json({ message: "Dokument byl vygenerován a odeslán e-mailem." });
-  } catch (error) {
-    console.error('Chyba při zpracování:', error);
-    res.status(500).json({ message: "Nastala chyba při zpracování požadavku." });
+Text zadání: ${text}
+
+(smlouva bude doplněna právníkem)
+`;
+
+    // odeslání e-mailu
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.MAIL_USER,
+        pass: process.env.MAIL_PASS,
+      },
+    });
+
+    await transporter.sendMail({
+      from: process.env.MAIL_USER,
+      to: email,
+      subject: 'Návrh smlouvy',
+      text: smlouva,
+    });
+
+    res.json({
+      message: ico ? 'Smlouva byla vytvořena a odeslána.' : 'Smlouva byla vytvořena bez IČO a odeslána.',
+      status: 'ok',
+    });
+  } catch (err) {
+    console.error('Chyba při zpracování:', err.message);
+    res.status(500).json({ message: 'Došlo k chybě při zpracování požadavku.' });
   }
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`✅ Server běží na http://localhost:${PORT}`);
+  console.log(`Server běží na portu ${PORT}`);
 });
